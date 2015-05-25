@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Zip library comparison - large unzip</title>
+
+
+  <!-- zip.js -->
+  <script type="application/javascript" src="zip.js/zip.js"></script>
+  <script type="application/javascript" src="zip.js/inflate.js"></script>
+  <script type="application/javascript" src="zip.js/deflate.js"></script>
+  <script type="application/javascript" src="zip.js/zip-fs.js"></script>
+  <script type="application/javascript" src="zip.js/zip-ext.js"></script>
+  <script type="application/javascript" src="zip.js/mime-types.js"></script>
+
+  <!-- benchmark.js -->
+  <script type="application/javascript" src="benchmark.js"></script>
+
+  <script>
+    Benchmark.prototype.setup = function() {
+      var js_zip_dir = 'zip.js/';
+      var sample_zip_url = '../files/large-complex-zip-file.zip';
+
+      function doJsZipTest(deferred, info) {
+        zip.createReader(new zip.HttpReader(sample_zip_url), function(zipReader) {
+          zipReader.getEntries(function(entries) {
+            console.log(info.name, 'entries.length:', entries.length);
+            var resultCount = entries.length
+            entries.forEach(function (entry) {
+              var writer = new zip.Data64URIWriter(zip.getMimeType(entry.fileName));
+              entry.getData(writer, function(data) {
+                --resultCount;
+                if (resultCount < 1) {
+                  deferred.resolve();
+                }
+              });
+            });
+          });
+        }, function(err) {
+          console.error(err, err.stack);
+          throw err;
+        });
+      }
+    };
+
+  </script>
+</head>
+<body>
+
+<script type="application/javascript">
+function run() {
+
+var suite = new Benchmark.Suite();
+suite
+.add("gildas-lormeau/zip.js default", {
+  defer: true,
+  fn: function (deferred) {
+    zip.useWebWorkers = false;
+    zip.workerScripts = {
+      deflater: [
+        js_zip_dir+'z-worker.js',
+        js_zip_dir+'deflate.js'
+      ],
+      inflater: [
+        js_zip_dir+'z-worker.js',
+        js_zip_dir+'inflate.js'
+      ],
+    };
+
+    doJsZipTest(deferred, {
+      name: 'default',
+    });
+  }
+})
+.add("gildas-lormeau/zip.js zlib-asmjs", {
+  defer: true,
+  fn: function (deferred) {
+    zip.useWebWorkers = false;
+    zip.workerScripts = {
+      deflater: [
+        js_zip_dir+'z-worker.js',
+        'https://rawgit.com/ukyo/zlib-asm/master/zlib.js',
+        js_zip_dir+'zlib-asm/codecs.js'
+      ],
+      inflater: [
+        js_zip_dir+'z-worker.js',
+        'https://rawgit.com/ukyo/zlib-asm/master/zlib.js',
+        js_zip_dir+'zlib-asm/codecs.js'
+      ],
+    };
+
+    doJsZipTest(deferred, {
+      name: 'zlib-asmjs',
+    });
+  }
+})
+.add("gildas-lormeau/zip.js pako", {
+  defer: true,
+  fn: function (deferred) {
+    zip.useWebWorkers = false;
+    zip.workerScripts = {
+      deflater: [
+        js_zip_dir+'z-worker.js',
+        'https://rawgit.com/nodeca/pako/master/dist/pako_deflate.min.js',
+        js_zip_dir+'pako/codecs.js'
+      ],
+      inflater: [
+        js_zip_dir+'z-worker.js',
+        'https://rawgit.com/nodeca/pako/master/dist/pako_inflate.min.js',
+        js_zip_dir+'pako/codecs.js'
+      ],
+    };
+
+    doJsZipTest(deferred, {
+      name: 'pako',
+    });
+  }
+})
+.on('cycle', function(event) {
+  var elem = document.getElementById('out');
+  elem.appendChild(document.createTextNode(event.target));
+  elem.appendChild(document.createElement("br"));
+})
+.on('complete', function() {
+  var elem = document.getElementById('out');
+  elem.appendChild(document.createTextNode("Finished."));
+  elem.appendChild(document.createElement("br"));
+})
+.run({
+  async: true
+});
+
+}
+</script>
+
+<div>
+  <button onclick="run();">
+    Run
+  </button>
+</div>
+
+<div id="out">
+</div>
+
+</body>
+</html>

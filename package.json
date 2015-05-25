@@ -1,0 +1,27 @@
+{
+  "name": "javascript-zip-performance-compare",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Compare the performance of front-end Javascript zip libraries",
+  "scripts": {
+    "installbenchmark": "curl http://cdnjs.cloudflare.com/ajax/libs/benchmark/1.0.0/benchmark.js > demo/benchmark.js",
+    "installzipjs": "git clone https://github.com/gildas-lormeau/zip.js && rm -rf demo/zip.js && mv zip.js/WebContent/ demo/zip.js && rm -rf zip.js",
+    "postinstall": "npm run installbenchmark && npm run installzipjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bguiz/javascript-zip-performance-compare.git"
+  },
+  "keywords": [
+    "zip",
+    "performance",
+    "benchmark"
+  ],
+  "author": "bguiz",
+  "license": "GPLv3",
+  "bugs": {
+    "url": "https://github.com/bguiz/javascript-zip-performance-compare/issues"
+  },
+  "homepage": "https://github.com/bguiz/javascript-zip-performance-compare"
+}
