@@ -21,20 +21,50 @@
       var js_zip_dir = 'zip.js/';
       var sample_zip_url = '../files/large-complex-zip-file.zip';
 
+      var MAX_CONCURRENT_INFLATE = 32;
+
       function doJsZipTest(deferred, info) {
         zip.createReader(new zip.HttpReader(sample_zip_url), function(zipReader) {
           zipReader.getEntries(function(entries) {
             console.log(info.name, 'entries.length:', entries.length);
-            var resultCount = entries.length
-            entries.forEach(function (entry) {
+            var resultCount = entries.length;
+            var concurrentEntries = 0;
+            var entryIndex = 0;
+            var aggregateDataSize = 0;
+
+            function doNextEntry() {
+              if (entryIndex >= entries.length) {
+                return;
+              }
+              var entry = entries[entryIndex];
               var writer = new zip.Data64URIWriter(zip.getMimeType(entry.fileName));
+              ++entryIndex;
+              ++concurrentEntries;
               entry.getData(writer, function(data) {
+                // Here we would do somethign with `data`,
+                // but for the purposes of beanchmarking,
+                // we are simply going to tally its size
+                aggregateDataSize += data.length;
+                --concurrentEntries;
                 --resultCount;
                 if (resultCount < 1) {
+                  console.log(info.name, 'aggregateDataSize:', aggregateDataSize);
                   deferred.resolve();
                 }
+                else if (concurrentEntries < MAX_CONCURRENT_INFLATE) {
+                  doNextEntry();
+                }
               });
-            });
+            }
+
+            // In V8, if we spawn too many CPU intensive callback functions
+            // at once, it is smart enough to rate limit it automatically
+            // This, however, is not the case for other Javascript VMs,
+            // so we need to implement by hand a means to
+            // limit the max number of concurrent operations
+            for (var t = 0; t < MAX_CONCURRENT_INFLATE; ++t) {
+              doNextEntry();
+            }
           });
         }, function(err) {
           console.error(err, err.stack);
