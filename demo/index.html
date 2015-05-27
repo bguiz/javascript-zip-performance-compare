@@ -21,8 +21,8 @@
       var js_zip_dir = 'zip.js/';
       var sample_zip_url = '../files/large-complex-zip-file.zip';
 
-      var MAX_CONCURRENT_INFLATE = 256;
-      var MAX_CONCURRENT_SIZE_COST = 1024 * 1024;
+      var MAX_CONCURRENT_INFLATE = 512;
+      var MAX_CONCURRENT_SIZE_COST = 2 * 1024 * 1024;
 
       function doJsZipTest(deferred, info) {
         zip.createReader(new zip.HttpReader(sample_zip_url), function(zipReader) {
@@ -41,11 +41,11 @@
               var entry = entries[entryIndex];
               var estimatedSizeCost =
                 entry.uncompressedSize * (entry.uncompressedSize / entry.compressedSize);
-              var writer = new zip.Data64URIWriter(zip.getMimeType(entry.fileName));
               ++entryIndex;
               ++concurrentEntries;
               concurrentCost += estimatedSizeCost;
 
+              var writer = new zip.Data64URIWriter(zip.getMimeType(entry.fileName));
               entry.getData(writer, function(data) {
                 // Here we would do something with `data`,
                 // but for the purposes of benchmarking,
@@ -58,11 +58,8 @@
                   console.log(info.name, 'aggregateDataSize:', aggregateDataSize);
                   deferred.resolve();
                 }
-                else if (
-                  concurrentEntries < 1 ||
-                  (concurrentEntries < MAX_CONCURRENT_INFLATE &&
-                   concurrentCost < MAX_CONCURRENT_SIZE_COST)) {
-                  doNextEntry();
+                else {
+                  doRateLimitedNextEntries();
                 }
               });
             }
@@ -72,9 +69,15 @@
             // This, however, is not the case for other Javascript VMs,
             // so we need to implement by hand a means to
             // limit the max number of concurrent operations
-            for (var t = 0; t < MAX_CONCURRENT_INFLATE; ++t) {
-              doNextEntry();
+            function doRateLimitedNextEntries() {
+              while (concurrentEntries < 1 ||
+                     (concurrentEntries <= MAX_CONCURRENT_INFLATE &&
+                      concurrentCost <= MAX_CONCURRENT_SIZE_COST)) {
+                doNextEntry();
+              }
             }
+
+            doRateLimitedNextEntries();
           });
         }, function(err) {
           console.error(err, err.stack);
