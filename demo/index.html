@@ -7,6 +7,7 @@
 
   <!-- zip.js -->
   <script type="application/javascript" src="zip.js/zip.js"></script>
+  <script type="application/javascript" src="zip.js/z-worker.js"></script>
   <script type="application/javascript" src="zip.js/inflate.js"></script>
   <script type="application/javascript" src="zip.js/deflate.js"></script>
   <script type="application/javascript" src="zip.js/zip-fs.js"></script>
@@ -21,10 +22,13 @@
       var js_zip_dir = 'zip.js/';
       var sample_zip_url = '../files/large-complex-zip-file.zip';
 
-      var MAX_CONCURRENT_INFLATE = 256;
-      var MAX_CONCURRENT_SIZE_COST = 1024 * 1024;
+      var MAX_CONCURRENT_INFLATE = 512;
+      var MAX_CONCURRENT_SIZE_COST = 2 * 1024 * 1024;
 
       function doJsZipTest(deferred, info) {
+        zip.useWebWorkers = info.useWebWorkers;
+        zip.workerScripts = info.workerScripts;
+
         zip.createReader(new zip.HttpReader(sample_zip_url), function(zipReader) {
           zipReader.getEntries(function(entries) {
             console.log(info.name, 'entries.length:', entries.length);
@@ -41,11 +45,11 @@
               var entry = entries[entryIndex];
               var estimatedSizeCost =
                 entry.uncompressedSize * (entry.uncompressedSize / entry.compressedSize);
-              var writer = new zip.Data64URIWriter(zip.getMimeType(entry.fileName));
               ++entryIndex;
               ++concurrentEntries;
               concurrentCost += estimatedSizeCost;
 
+              var writer = new zip.Data64URIWriter(zip.getMimeType(entry.fileName));
               entry.getData(writer, function(data) {
                 // Here we would do something with `data`,
                 // but for the purposes of benchmarking,
@@ -58,11 +62,8 @@
                   console.log(info.name, 'aggregateDataSize:', aggregateDataSize);
                   deferred.resolve();
                 }
-                else if (
-                  concurrentEntries < 1 ||
-                  (concurrentEntries < MAX_CONCURRENT_INFLATE &&
-                   concurrentCost < MAX_CONCURRENT_SIZE_COST)) {
-                  doNextEntry();
+                else {
+                  doRateLimitedNextEntries();
                 }
               });
             }
@@ -72,9 +73,15 @@
             // This, however, is not the case for other Javascript VMs,
             // so we need to implement by hand a means to
             // limit the max number of concurrent operations
-            for (var t = 0; t < MAX_CONCURRENT_INFLATE; ++t) {
-              doNextEntry();
+            function doRateLimitedNextEntries() {
+              while (concurrentEntries < 1 ||
+                     (concurrentEntries <= MAX_CONCURRENT_INFLATE &&
+                      concurrentCost <= MAX_CONCURRENT_SIZE_COST)) {
+                doNextEntry();
+              }
             }
+
+            doRateLimitedNextEntries();
           });
         }, function(err) {
           console.error(err, err.stack);
@@ -92,67 +99,119 @@ function run() {
 
 var suite = new Benchmark.Suite();
 suite
-.add("gildas-lormeau/zip.js default", {
+.add("gildas-lormeau/zip.js default without webworkers", {
   defer: true,
   fn: function (deferred) {
-    zip.useWebWorkers = false;
-    zip.workerScripts = {
-      deflater: [
-        js_zip_dir+'z-worker.js',
-        js_zip_dir+'deflate.js'
-      ],
-      inflater: [
-        js_zip_dir+'z-worker.js',
-        js_zip_dir+'inflate.js'
-      ],
-    };
-
     doJsZipTest(deferred, {
       name: 'default',
+      useWebWorkers: false,
+      workerScripts: {
+        deflater: [
+          js_zip_dir+'deflate.js'
+        ],
+        inflater: [
+          js_zip_dir+'inflate.js'
+        ],
+      },
     });
   }
 })
-.add("gildas-lormeau/zip.js zlib-asmjs", {
+.add("gildas-lormeau/zip.js default with webworkers", {
   defer: true,
   fn: function (deferred) {
-    zip.useWebWorkers = false;
-    zip.workerScripts = {
-      deflater: [
-        js_zip_dir+'z-worker.js',
-        'https://rawgit.com/ukyo/zlib-asm/master/zlib.js',
-        js_zip_dir+'zlib-asm/codecs.js'
-      ],
-      inflater: [
-        js_zip_dir+'z-worker.js',
-        'https://rawgit.com/ukyo/zlib-asm/master/zlib.js',
-        js_zip_dir+'zlib-asm/codecs.js'
-      ],
-    };
-
+    doJsZipTest(deferred, {
+      name: 'default',
+      useWebWorkers: true,
+      workerScripts: {
+        deflater: [
+          js_zip_dir+'z-worker.js',
+          js_zip_dir+'deflate.js'
+        ],
+        inflater: [
+          js_zip_dir+'z-worker.js',
+          js_zip_dir+'inflate.js'
+        ],
+      },
+    });
+  }
+})
+.add("gildas-lormeau/zip.js zlib-asmjs without webworkers", {
+  defer: true,
+  fn: function (deferred) {
     doJsZipTest(deferred, {
       name: 'zlib-asmjs',
+      useWebWorkers: false,
+      workerScripts: {
+        deflater: [
+          'https://rawgit.com/ukyo/zlib-asm/master/zlib.js',
+          js_zip_dir+'zlib-asm/codecs.js'
+        ],
+        inflater: [
+          'https://rawgit.com/ukyo/zlib-asm/master/zlib.js',
+          js_zip_dir+'zlib-asm/codecs.js'
+        ],
+      },
     });
   }
 })
-.add("gildas-lormeau/zip.js pako", {
+.add("gildas-lormeau/zip.js zlib-asmjs with webworkers", {
   defer: true,
   fn: function (deferred) {
-    zip.useWebWorkers = false;
-    zip.workerScripts = {
-      deflater: [
-        js_zip_dir+'z-worker.js',
-        'https://rawgit.com/nodeca/pako/master/dist/pako_deflate.min.js',
-        js_zip_dir+'pako/codecs.js'
-      ],
-      inflater: [
-        js_zip_dir+'z-worker.js',
-        'https://rawgit.com/nodeca/pako/master/dist/pako_inflate.min.js',
-        js_zip_dir+'pako/codecs.js'
-      ],
-    };
-
+    doJsZipTest(deferred, {
+      name: 'zlib-asmjs',
+      useWebWorkers: true,
+      workerScripts: {
+        deflater: [
+          js_zip_dir+'z-worker.js',
+          'https://rawgit.com/ukyo/zlib-asm/master/zlib.js',
+          js_zip_dir+'zlib-asm/codecs.js'
+        ],
+        inflater: [
+          js_zip_dir+'z-worker.js',
+          'https://rawgit.com/ukyo/zlib-asm/master/zlib.js',
+          js_zip_dir+'zlib-asm/codecs.js'
+        ],
+      },
+    });
+  }
+})
+.add("gildas-lormeau/zip.js pako without webworkers", {
+  defer: true,
+  fn: function (deferred) {
     doJsZipTest(deferred, {
       name: 'pako',
+      useWebWorkers: false,
+      workerScripts: {
+        deflater: [
+          'https://rawgit.com/nodeca/pako/master/dist/pako_deflate.min.js',
+          js_zip_dir+'pako/codecs.js'
+        ],
+        inflater: [
+          'https://rawgit.com/nodeca/pako/master/dist/pako_inflate.min.js',
+          js_zip_dir+'pako/codecs.js'
+        ],
+      },
+    });
+  }
+})
+.add("gildas-lormeau/zip.js pako with webworkers", {
+  defer: true,
+  fn: function (deferred) {
+    doJsZipTest(deferred, {
+      name: 'pako',
+      useWebWorkers: true,
+      workerScripts: {
+        deflater: [
+          js_zip_dir+'z-worker.js',
+          'https://rawgit.com/nodeca/pako/master/dist/pako_deflate.min.js',
+          js_zip_dir+'pako/codecs.js'
+        ],
+        inflater: [
+          js_zip_dir+'z-worker.js',
+          'https://rawgit.com/nodeca/pako/master/dist/pako_inflate.min.js',
+          js_zip_dir+'pako/codecs.js'
+        ],
+      },
     });
   }
 })
